@@ -121,8 +121,10 @@ local function make(opts)
     error("invald path type:" .. type(opts.path))
   end
   if path then
-    local content = assert(io.open(path, "r")):read("*a")
-    env = dict(env, assert(parse(content)))
+    local file = io.open(path, "r")
+    if file then
+      env = dict(env, assert(parse(file:read("*a"))))
+    end
   end
   return env
 end
