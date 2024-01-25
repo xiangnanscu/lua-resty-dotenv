@@ -1,6 +1,7 @@
+local os = os
 local gmatch = ngx.re.gmatch
 local match = ngx.re.match
-
+local gsub = ngx.re.gsub
 
 -- https://github.com/motdotla/dotenv/blob/master/lib/main.js
 local LINE =
@@ -90,7 +91,7 @@ local function expand_key(env_value, env)
       -- end
       value = expand_key(value, env)
     end
-    env_value = assert(ngx.re.gsub(env_value, '\\' .. replacePart, value))
+    env_value = assert(gsub(env_value, '\\' .. replacePart, value))
   end
   return env_value
 end
@@ -117,7 +118,7 @@ local function make(opts)
       end
     end
   else
-    error("invald path type:" .. type(opts.type))
+    error("invald path type:" .. type(opts.path))
   end
   if path then
     local content = assert(io.open(path, "r")):read("*a")
@@ -126,18 +127,29 @@ local function make(opts)
   return env
 end
 
--- local function say(...)
---   for index, value in ipairs({ ... }) do
---     ngx.print(require('xodel.utils').repr(value))
---   end
---   ngx.say('---------------------------------')
--- end
-
-local function __call(t, opts)
+local function parsing_file(opts)
   return expand(make(opts))
 end
 
-local dotenv = setmetatable({ parse = parse, make = make, expand = expand }, { __call = __call })
+local JSON_ENV
+local function getenv(key)
+  if not JSON_ENV then
+    local json = parsing_file { path = { '.env', '.env.local' } }
+    JSON_ENV = json
+  end
+  if key then
+    return JSON_ENV[key]
+  else
+    return JSON_ENV
+  end
+end
+
+local dotenv = setmetatable({ parse = parse, make = make, expand = expand, getenv = getenv },
+  {
+    __call = function(t, opts)
+      return parsing_file(opts)
+    end
+  })
 
 dotenv.__index = dotenv
 
