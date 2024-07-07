@@ -1,142 +1,130 @@
-local os = os
-local gmatch = ngx.re.gmatch
-local match = ngx.re.match
-local gsub = ngx.re.gsub
-
--- https://github.com/motdotla/dotenv/blob/master/lib/main.js
-local LINE =
-[[(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)]]
-
-local function dict(a, b)
-  local t = {}
-  for key, value in pairs(a) do
-    t[key] = value
-  end
-  for key, value in pairs(b) do
-    t[key] = value
-  end
-  return t
+local function expand_value(value, env)
+  return (value:gsub("%$%b{}", function(match)
+    return env[match:sub(3, -2)] or match
+  end):gsub("%$(%w+)", function(match)
+    return env[match] or match
+  end))
 end
 
-local function split(s, sep)
-  local res = {}
-  sep = sep or " "
+local function parse(content)
+  local env = setmetatable({}, {
+    __newindex = function(t, k, v)
+      rawset(t, k, v)
+      print(k, '->', v)
+    end
+  })
+  local state = "key"
+  local key, value = "", ""
+  local quote_char = nil
   local i = 1
-  local a, b
-  while true do
-    a, b = s:find(sep, i, true)
-    if a then
-      local e = s:sub(i, a - 1)
-      i = b + 1
-      res[#res + 1] = e
-    else
-      res[#res + 1] = s:sub(i)
-      return res
-    end
-  end
-end
+  local len = #content
 
-local function parse(src)
-  local obj = {}
-  local it = assert(gmatch(src, LINE, "msui"))
-  while true do
-    local m, err = it()
-    if err then
-      return nil, err
-    end
-    if not m then
-      break
-    end
-    local key = m[1]
-    local value = m[2] or ""
-    value = (value:gsub("^%s*(.-)%s*$", "%1"))
-    local maybeQuote = value:sub(1, 1);
-    -- remove surrounding quotes
-    value = (value:gsub([[^(['"`])([%s%S]*)%1$]], "%2"))
-    if maybeQuote == '"' then
-      value = value:gsub([[\n]], "\n")
-      value = value:gsub([[\r]], "\r")
-    end
-    obj[key] = value;
-  end
-  return obj;
-end
+  while i <= len do
+    local char = content:sub(i, i)
 
----@param env_value string
----@param env table
----@return string
-local function expand_key(env_value, env)
-  local index = 0
-  for m in gmatch(env_value, [[(.?\${*[\w]*(?::-[\w/]*)?}*)]], 'msui') do
-    index = index + 1
-    local parts = assert(match(m[1], [[(.?)\${*([\w]*(?::-[\w/]*)?)?}*]]))
-    local prefix = parts[1]
-    local value, replacePart;
-    if prefix == '\\' then
-      ---@type string
-      replacePart = parts[1];
-      value = replacePart:sub(2)
-    else
-      local keyParts = split(parts[2], ':-')
-      local key = keyParts[1]
-      replacePart = parts[0]:sub(#prefix + 1);
-      local ek = os.getenv(key)
-      if ek ~= nil then
-        value = ek
+    if state == "key" then
+      if char:match("[%w_]") then
+        key = key .. char
+      elseif char:match("%s") and key ~= "" then
+        state = "after_key"
+      elseif char == "=" then
+        state = "before_value"
+      elseif char == "#" and key == "" then
+        -- Skip to end of line
+        while i <= len and content:sub(i, i) ~= "\n" do
+          i = i + 1
+        end
+      end
+    elseif state == "after_key" then
+      if char == "=" then
+        state = "before_value"
+      elseif not char:match("%s") then
+        -- Invalid character in key
+        key = ""
+        state = "invalid"
+      end
+    elseif state == "before_value" then
+      if char:match("%s") then
+        -- Skip whitespace
+      elseif char == "'" or char == '"' or char == "`" then
+        quote_char = char
+        state = "quoted_value"
       else
-        value = env[key] or keyParts[2] or ""
+        value = value .. char
+        state = "value"
       end
-      -- if #keyParts>1 and value then
-      --   local replaceNested = ""
-      -- end
-      value = expand_key(value, env)
+    elseif state == "value" then
+      if char == "#" then
+        -- End of value, start of comment
+        env[key] = expand_value(value:match("^%s*(.-)%s*$"), env)
+        key, value = "", ""
+        state = "comment"
+      elseif char == "\n" then
+        -- End of value
+        env[key] = expand_value(value:match("^%s*(.-)%s*$"), env)
+        key, value = "", ""
+        state = "key"
+      else
+        value = value .. char
+      end
+    elseif state == "quoted_value" then
+      if char == quote_char then
+        -- End of quoted value
+        env[key] = expand_value(value, env)
+        key, value = "", ""
+        state = "after_value"
+      else
+        value = value .. char
+      end
+    elseif state == "after_value" then
+      if char == "\n" then
+        state = "key"
+        -- Ignore everything else until newline
+      end
+    elseif state == "comment" then
+      if char == "\n" then
+        state = "key"
+      end
+    elseif state == "invalid" then
+      if char == "\n" then
+        state = "key"
+      end
     end
-    env_value = assert(gsub(env_value, '\\' .. replacePart, value))
+    i = i + 1
   end
-  return env_value
-end
 
-local function expand(env)
-  for key, value in pairs(env) do
-    env[key] = expand_key(value, env)
+  -- Handle last value if not followed by newline
+  if key ~= "" and value ~= "" then
+    env[key] = expand_value(value:match("^%s*(.-)%s*$"), env)
   end
+
   return env
 end
 
-local function make(opts)
-  opts = opts or {}
-  local path
+
+local function parse_file(path)
+  local lines = assert(io.open(path, "r")):read("*a")
+  local env = assert(parse(lines))
+  return env
+end
+
+local function parse_files(a)
   local env = {}
-  if opts.path == nil then
-    path = '.env'
-  elseif type(opts.path) == 'string' then
-    path = opts.path
-  elseif type(opts.path) == 'table' then
-    for _, p in ipairs(opts.path) do
-      for key, value in pairs(make(dict(opts, { path = p }))) do
-        env[key] = value
-      end
-    end
-  else
-    error("invald path type:" .. type(opts.path))
-  end
-  if path then
-    local file = io.open(path, "r")
-    if file then
-      env = dict(env, assert(parse(file:read("*a"))))
+  for i, path in ipairs(a) do
+    local res = parse_file(path)
+    for key, value in pairs(res) do
+      env[key] = value
     end
   end
   return env
-end
-
-local function parsing_file(opts)
-  return expand(make(opts))
 end
 
 local JSON_ENV
+---@param key string
+---@return string|table
 local function getenv(key)
   if not JSON_ENV then
-    local json = parsing_file { path = { '.env', '.env.local' } }
+    local json = parse_files { '.env', '.env.local' }
     JSON_ENV = json
   end
   if key then
@@ -146,13 +134,20 @@ local function getenv(key)
   end
 end
 
-local dotenv = setmetatable({ parse = parse, make = make, expand = expand, getenv = getenv },
+local dotenv = setmetatable(
   {
-    __call = function(t, opts)
-      return parsing_file(opts)
+    parse = parse,
+    parse_file = parse_file,
+    getenv = getenv
+  },
+  {
+    __call = function(t, a)
+      if type(a) == 'string' then
+        return assert(parse(a))
+      end
+      assert(type(a) == 'table', 'invalid type:' .. type(a))
+      return parse_files(a)
     end
   })
-
-dotenv.__index = dotenv
 
 return dotenv
