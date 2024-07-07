@@ -46,7 +46,12 @@ local function parse(content)
         state = "invalid"
       end
     elseif state == "before_value" then
-      if char:match("%s") then
+      if char == "\n" then
+        -- empty value
+        env[key] = ""
+        key, value = "", ""
+        state = "key"
+      elseif char:match("%s") then
         -- Skip whitespace
       elseif char == "'" or char == '"' or char == "`" then
         quote_char = char
@@ -96,7 +101,7 @@ local function parse(content)
   end
 
   -- Handle last value if not followed by newline
-  if key ~= "" and value ~= "" then
+  if key ~= "" then
     env[key] = expand_value(value:match("^%s*(.-)%s*$"), env)
   end
 
@@ -105,7 +110,11 @@ end
 
 
 local function parse_file(path)
-  local lines = assert(io.open(path, "r")):read("*a")
+  local file = io.open(path, "r")
+  if not file then
+    return {}
+  end
+  local lines = file:read("*a")
   local env = assert(parse(lines))
   return env
 end
@@ -126,7 +135,7 @@ local JSON_ENV
 ---@return string|table
 local function getenv(key)
   if not JSON_ENV then
-    local json = parse_files { '.env', '.env.local' }
+    local json = parse_files { '.env' }
     JSON_ENV = json
   end
   if key then
@@ -146,6 +155,9 @@ local dotenv = setmetatable(
     __call = function(t, a)
       if type(a) == 'string' then
         return assert(parse(a))
+      end
+      if a == nil then
+        return parse_files { '.env' }
       end
       assert(type(a) == 'table', 'invalid type:' .. type(a))
       return parse_files(a)
