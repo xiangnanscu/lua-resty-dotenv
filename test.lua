@@ -37,3 +37,5 @@ YOUR/FANCY/=KEY/YOUR/FANCY/=KEY
 for key, value in pairs(expected_env) do
   assert(env[key] == value, string.format("key [%s] value [%s] doesn't equal expected [%s]", key, env[key], value))
 end
+
+print("test passed!")

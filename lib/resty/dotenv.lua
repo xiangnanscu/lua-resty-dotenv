@@ -6,13 +6,15 @@ local function expand_value(value, env)
   end))
 end
 
+-- local env = setmetatable({}, {
+--   __newindex = function(t, k, v)
+--     rawset(t, k, v)
+--     print(k, '->', v)
+--   end
+-- })
+
 local function parse(content)
-  local env = setmetatable({}, {
-    __newindex = function(t, k, v)
-      rawset(t, k, v)
-      print(k, '->', v)
-    end
-  })
+  local env = {}
   local state = "key"
   local key, value = "", ""
   local quote_char = nil
