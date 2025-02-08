@@ -138,13 +138,24 @@ local function parse_files(a)
   return env
 end
 
+local function dotenv_main(a)
+  if a == nil then
+    return parse_file '.env'
+  elseif type(a) == 'string' then
+    return assert(parse(a))
+  else
+    assert(type(a) == 'table', 'invalid type:' .. type(a))
+    return parse_files(a)
+  end
+end
+
 local JSON_ENV
 ---@param key string
 ---@return string
 ---@overload fun():environment
 local function getenv(key)
   if not JSON_ENV then
-    local json = parse_files { '.env' }
+    local json = parse_file '.env'
     JSON_ENV = json
   end
   if key then
@@ -164,14 +175,7 @@ local dotenv = setmetatable(
   },
   {
     __call = function(t, a)
-      if type(a) == 'string' then
-        return assert(parse(a))
-      end
-      if a == nil then
-        return parse_files { '.env' }
-      end
-      assert(type(a) == 'table', 'invalid type:' .. type(a))
-      return parse_files(a)
+      return dotenv_main(a)
     end
   })
 
