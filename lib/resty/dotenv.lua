@@ -13,6 +13,10 @@ end
 --   end
 -- })
 
+---@alias environment {[string]:string}
+
+---@param content string
+---@return environment
 local function parse(content)
   local env = {}
   local state = "key"
@@ -109,6 +113,8 @@ local function parse(content)
 end
 
 
+---@param path string
+---@return environment
 local function parse_file(path)
   local file = io.open(path, "r")
   if not file then
@@ -119,6 +125,8 @@ local function parse_file(path)
   return env
 end
 
+---@param a string[]
+---@return environment
 local function parse_files(a)
   local env = {}
   for i, path in ipairs(a) do
@@ -132,7 +140,8 @@ end
 
 local JSON_ENV
 ---@param key string
----@return string|table
+---@return string
+---@overload fun():environment
 local function getenv(key)
   if not JSON_ENV then
     local json = parse_files { '.env' }
@@ -145,6 +154,8 @@ local function getenv(key)
   end
 end
 
+---@class Dotenv
+---@operator call:environment
 local dotenv = setmetatable(
   {
     parse = parse,
